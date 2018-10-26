@@ -1,0 +1,61 @@
+'''
+modified by dezanzhao
+2018-10-16
+'''
+import tensorflow as tf
+bit = 1
+def ternarize(x, thresh=0.05):
+    """
+    Implemented Trained Ternary Quantization:
+    https://arxiv.org/abs/1612.01064
+    Code modified from the authors' at:
+    https://github.com/czhu95/ternarynet/blob/master/examples/Ternary-Net/ternary.py
+    """
+    shape = x.get_shape()
+
+    thre_x = tf.stop_gradient(tf.reduce_max(tf.abs(x)) * thresh)
+
+    w_p = tf.get_variable('Wp', initializer=1.0, dtype=tf.float32)
+    w_n = tf.get_variable('Wn', initializer=1.0, dtype=tf.float32)
+
+    tf.summary.scalar(w_p.op.name + '-summary', w_p)
+    tf.summary.scalar(w_n.op.name + '-summary', w_n)
+
+    mask = tf.ones(shape)
+    mask_p = tf.where(x > thre_x, tf.ones(shape) * w_p, mask)
+    mask_np = tf.where(x < -thre_x, tf.ones(shape) * w_n, mask_p)
+    mask_z = tf.where((x < thre_x) & (x > - thre_x), tf.zeros(shape), mask)
+
+    @tf.custom_gradient
+    def _sign_mask(x):
+        return tf.sign(x) * mask_z, lambda dy: dy
+
+    w = _sign_mask(x)
+
+    w = w * mask_np
+
+    tf.summary.histogram(w.name, w)
+    return w
+def fw(x):
+    if bit==1:
+        E = tf.stop_gradient(tf.reduce_mean(tf.abs(x)))
+
+        @tf.custom_gradient
+        def _sign(x):
+            return tf.where(tf.equal(x, 0), tf.ones_like(x), tf.sign(x / E)) * E, lambda dy: dy
+        return _sign(x)
+    else bit==2:
+        return ternarize(x)
+def new_get_variable(v):
+    name = v.op.name
+    # don't binarize first and last layer
+    #if not name.endswith('W') or 'conv0' in name or 'fct' in name:
+    if not name.endswith('W'):
+        return v
+    else:
+        logger.info("Quantizing weight {}".format(v.op.name))
+        return fw(v)
+if __name__=='__main__':
+    print 'hello'
+    #with remap_variables(new_get_variable):
+    #models defined
